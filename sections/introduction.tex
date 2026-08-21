@@ -1,0 +1,75 @@
+\section{Introduction}
+
+With the rise of agentic development workflows, source code is produced at an unprecedented speed, resulting in faster release cycles, while simultaneously increasing the manual code review load.
+Code produced by coding agents frequently contains exploitable weaknesses even when functionally correct \cite{vero2025}, and manual security assessment, adding to the burden of functional code review, does not scale with the rate at which such code is produced. \ac{sast} therefore serves as an increasingly important safeguard, inspecting source code without executing it to find potential vulnerabilities before they reach production.
+
+A recurring problem is that a
+large share of reported findings does not correspond to a real vulnerability in
+its specific context. These \acp{fp} carry a measurable cost. According to a 2025
+industry report, 63\% of security teams spend at least four hours per week
+triaging \acp{fp} \cite{nash2025falsepositive}. Time spent dismissing
+false alerts is time not spent on real vulnerabilities, and a steady stream
+of noise erodes developer trust in the tools themselves \cite{johnson2013why}.
+
+Reducing this burden remains difficult by conventional means. Whether a given
+finding is an \ac{fp} can rarely be determined from the finding alone. It
+also depends on things like how the surrounding code uses the flagged construct or whether
+user input can reach it without being sanitized first. A static scanner reports
+the finding because it cannot resolve this context on its own, so a
+deterministic filter layered on top would have to reconstruct this semantic
+understanding the scanner lacks. An \ac{llm} can reason over
+this kind of code context, which makes it a suitable basis for this task.
+
+This paper presents Polygraph, a tool that classifies \ac{sast} findings as \acp{tp} or \acp{fp}. This reduces the effort necessary to deal with large volumes of \ac{sast} findings and allows developers to focus on genuine vulnerabilities, directly solving the problems conventional scanners introduce.
+
+Polygraph reads and writes standard \ac{sarif} reports, so it sits between any
+compliant scanner and viewer. It parses the heterogeneous set of findings, de-duplicates them based on the type of the finding and location, and categorizes them into \ac{cwe} classes.
+Afterwards, it assembles finding-specific contexts that include the surrounding code, documentation and on-demand data-flow analysis, and queries an \ac{llm} for a
+verdict. When the static context does not suffice for a decision, the model
+declines to classify, and Polygraph escalates the finding to
+an autonomous agent that explores the repository directly.
+
+On the OWASP Benchmark for Python \cite{owaspbenchmark}, Polygraph reaches an
+F1-score of 0.977 on the \ac{fp} class at a balanced accuracy of
+0.973, suppressing 95.8\% of the benchmark's \ac{fp} traps at a
+suppression precision of 0.997 and a dangerous-suppression rate of only
+0.4\%. RealVuln \cite{realvuln} is a benchmark of intentionally vulnerable
+open-source applications whose findings, unlike OWASP's single-file cases,
+depend on code distributed across a repository. It is correspondingly
+harder: Polygraph reaches a lower F1-score of 0.797 at a balanced accuracy of
+0.880. It still suppresses 82.5\% of the benchmark's \ac{fp} traps,
+at a dangerous-suppression rate of 5.0\%.
+
+In summary, this paper makes the following contributions:
+\begin{itemize}
+    \item Polygraph, a \ac{sarif}-native tool that assembles a finding-specific context from surrounding code, documentation, and on-demand data-flow analysis, and queries an \ac{llm} to classify each finding as a \ac{tp} or \ac{fp}, so it drops into any pipeline between an existing scanner and viewer.
+    \item A two-stage classification design in which findings the static context cannot settle are escalated to an autonomous agent that explores the repository directly, keeping the common case cheap while still resolving the harder, context-dependent cases.
+    \item An evaluation on the OWASP Benchmark for Python and on RealVuln, a repository-scale benchmark of intentionally vulnerable open-source applications, showing that Polygraph suppresses 95.8\% and 82.5\% of each benchmark's \ac{fp} traps, respectively, while keeping the rate of dangerously suppressed \acp{tp} at 0.4\% and 5.0\%.
+\end{itemize}
+
+\subsection{Background}
+
+\ac{sast} tools statically analyze a program's source or compiled code and
+report code patterns that may indicate a security vulnerability, such as an
+injection flaw or unsafe handling of user input \cite{chess2004static}. Each
+issue such a tool reports is a finding, annotated with a rule identifier, a
+severity, and the code location it concerns. Because these tools only statically
+analyze the source code and do not interpret the context around the finding, like sanitization steps or dynamic behavior at runtime, they also report many findings that are not real vulnerabilities in their context.
+Some tools also over-approximate and rather report an \ac{fp} than missing a \ac{tp}, which results in further increases of the overall volume of findings.
+
+Individual \ac{sast} tools historically output their results in incompatible,
+proprietary formats, which complicates aggregating and processing findings
+across tools. \Ac{sarif} addresses this as an OASIS standard that defines a single
+JSON-based format for static-analysis output \cite{sarif2020}. A \ac{sarif} report
+records each finding together with its rule, severity, and location, and it
+provides standard fields such as \texttt{suppressions} to mark findings that a
+viewer should hide. Polygraph reads \ac{sarif} as input and writes \ac{sarif} as output,
+which lets it operate between existing scanners and any viewer or dashboard that
+supports \ac{sarif}.
+
+Many \ac{sast} findings deal with uncontrolled and unsanitized user-input reaching a sensible sink, such as a database query or system command. For these findings, the way data flows into the vulnerable line is essential
+to determine if it is genuine. Data-flow analysis addresses this by statically tracing values from their source, where the data enters the program, to the sink, which in our case is the location reported by the \ac{sast} tool.
+A common form is taint analysis, which tracks whether data from an untrusted source, like user input, reaches a
+security-sensitive sink, such as a database query, and whether a sanitizer
+neutralizes the data along the way \cite{tripp2009taj}.
+Polygraph computes this information using \texttt{CodeQL}\cite{codeql}, a well-established framework for semantic code analysis that models a program as a queryable database and includes data-flow and taint-tracking libraries.

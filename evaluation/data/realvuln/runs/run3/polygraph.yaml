@@ -1,0 +1,73 @@
+# Base configuration for `polygraph scan`.
+#
+# This file mirrors the ScanProperties/PipelineConfig model one-to-one: every key below
+# is also a command-line option, and every option can be set here. Pass it with:
+#
+#   polygraph scan --config polygraph.yaml --sarif findings.sarif --output ./out --repository .
+#
+# Anything given explicitly on the command line overrides the value from this file, so a
+# project-specific setting can be layered on without a second file:
+#
+#   polygraph scan --config polygraph.yaml --enrichment-dataflow-build_script_c ./build_c.sh
+#
+# Note: relative paths resolve from the current working directory, not from this file.
+# Boolean options are named negatively (`disabled`) because the CLI requires them to
+# default to false.
+
+minimum_severity: none # error | warning | note | none — findings below this severity are kept in the output SARIF but skipped from classification
+
+llm:
+  provider: cipherai # anthropic | openai | ollama | zai | any (defaults to OpenAI-compatible)
+  model: ai005
+  base_url: https://ai.ciphercell.de/v1 # For OpenAI-compatible endpoints (or set env $POLYGRAPH_LLM_BASE_URL)
+  reasoning_effort: minimal # default | off | minimal | low | medium | high | xhigh
+  max_tokens: 6000 # Covers minimal reasoning plus the verdict (measured ~1.6k) with headroom
+  max_requests: 3 # One output-validation retry, then give up on the finding
+  max_retries: 2 # Transport retries per request (408/409/429/5xx only)
+  timeout_seconds: 60 # Per streamed chunk, not for the whole response
+  # api_key is deliberately absent — it is read from the environment / .env
+
+agent:
+  provider: cipherai # anthropic | openai | ollama | zai | any — independent of llm:
+  model: ai005 # TODO: point this at the strongest model available on the endpoint
+  base_url: https://ai.ciphercell.de/v1 # For OpenAI-compatible endpoints (no env override — set explicitly here)
+  reasoning_effort: high # Stage 2 is where thinking is worth paying for
+  max_tokens: 16000
+  max_requests: 25 # Tool calls consume one request each
+  compact_above_tokens: 60000 # Elide the oldest tool output/reasoning past this (0 disables)
+  max_retries: 2
+  timeout_seconds: 180 # Per streamed chunk; investigation turns are longer than triage
+
+escalation:
+  # Rules are "<VERDICT>" or "<VERDICT>:<CERTAINTY>". A finding escalates when its
+  # verdict matches a rule and, if the rule names a certainty, its certainty is
+  # strictly below that level. So UNCERTAIN escalates at any certainty, and
+  # FALSE_POSITIVE:HIGH escalates unless certainty is HIGH — i.e. "escalate unless HIGH".
+  rules:
+    - UNCERTAIN
+    - FALSE_POSITIVE:HIGH
+  # minimum_priority is unset (suppress nothing extra) — set to CRITICAL | HIGH | MEDIUM |
+  # LOW | INFORMATIONAL to also suppress findings below that priority, like FALSE_POSITIVE.
+
+enrichment:
+  snippet:
+    context_strategy: method # method | class | file | line_range
+    fallback_lines_before: 30 # Used for line_range strategy or as fallback
+    fallback_lines_after: 20 # Used for line_range strategy or as fallback
+  header:
+    disabled: false # Set true to skip file header/docstring extraction
+    max_lines: 50 # Maximum lines to scan for header comment
+  dataflow:
+    disabled: true # Set false to enable CodeQL dataflow analysis
+    database_path: null # Path to existing CodeQL database (optional, auto-created if null)
+    minimum_severity: warning # Minimum finding severity to trigger dataflow analysis (error | warning | note | none)
+    codeql_backend: docker # Where to run CodeQL (native | docker)
+    codeql_path: codeql # Path to codeql binary (native backend only, default: "codeql" from PATH)
+    max_paths: 1000 # Maximum number of dataflow paths CodeQL reports per query (higher values increase coverage but raise memory and runtime)
+    build_script_c: null # Build script tracing a C CodeQL database (null = codeql autobuild)
+    build_script_cpp: null # Build script tracing a C++ CodeQL database (null = codeql autobuild)
+
+cache:
+  disabled: true # Set true to bypass the persistent LLM response cache
+  cache_path: ~/.cache/polygraph/llm_responses.sqlite # SQLite file holding cached LLM responses
+  ttl_seconds: 2592000 # 30 days — stale entries are re-classified even if the finding is unchanged

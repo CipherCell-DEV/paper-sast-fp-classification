@@ -1,0 +1,30 @@
+\section{Conclusion and Future Work}
+
+We presented Polygraph, a tool that classifies \ac{sast} findings as \acp{tp}
+or \acp{fp} from a compact, finding-specific context. It reads and writes
+standard \ac{sarif} and records its verdicts in the standard
+\texttt{suppressions} field, so it operates between any compliant scanner and any
+compliant viewer. Its two-stage design keeps the common case cheap, as only the
+findings the static context does not settle escalate to an autonomous agent that
+explores the repository on its own.
+
+On the OWASP Benchmark for Python, the best of four open-weight models reached an
+F1-score of 0.977 on the \ac{fp} class, suppressing 95.8\% of the traps at
+a dangerous-suppression rate of 0.4\%. On RealVuln, whose verdicts depend on code
+spread across a repository, it reached an F1-score of 0.797 and suppressed 82.5\%
+of the traps at a dangerous-suppression rate of 5.0\%. Escalation remained rare
+where the static context sufficed, firing on 3.6\% of the OWASP findings, and
+recovered 145 real vulnerabilities on RealVuln for 7 retained traps. Parameter
+count did not predict quality, as the 27B model led and the 80B model ranked
+last.
+
+Several directions remain open. All runs ran without data-flow analysis, since it
+is the slowest step of the pipeline, so the contribution of this context signal
+is still unmeasured. Selecting the enrichers per finding,
+guided by its \ac{cwe} class, would limit that cost to the findings whose
+verdict depends on it. Second,
+the evaluation covers Python alone and consumes synthesized reports rather than
+live scanner output, so a broader study across languages, scanners, and
+production code is needed to show how far these results transfer. Finally, given that
+model size did not decide quality, post-training a small open-weight model
+with confirmed real-world \acp{tp} and \acp{fp} could result in better results overall.

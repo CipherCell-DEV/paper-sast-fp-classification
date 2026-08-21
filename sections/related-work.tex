@@ -1,0 +1,89 @@
+\section{Related Work}
+
+ZeroFalse and QASecClaw are the two systems most closely related to Polygraph.
+Both combine a \ac{sast} scanner with an \ac{llm} that reviews each finding to
+decide whether it is a real vulnerability, the same basis Polygraph builds on,
+and both decide it in a single pass. Xiong and Zhang instead evaluate autonomous
+agents that investigate every finding on their own, which is the second stage
+Polygraph applies selectively when necessary.
+
+ZeroFalse \cite{iranmanesh2025zerofalseimprovingprecisionstatic} operates only
+on findings from CodeQL. It treats such alerts as structured contracts and
+enriches them with the scanner's own data-flow trace, the surrounding code, and
+information specific to each \ac{cwe} class before a
+single \ac{llm} pass returns a verdict. Across the OWASP Java Benchmark and a curated
+real-world dataset it reaches F1-scores of 0.912 and 0.955, below Polygraph's
+0.977 on the Python variant of the OWASP Benchmark. Its design is based
+on \ac{cwe}-specific tailoring, and the authors name contextual blindness, the
+difficulty of supplying sufficient context for a multi-file finding, as an open
+problem. Polygraph addresses this problem with the autonomous escalation agent that gathers evidence on-demand.
+It also maintains no prompt per weakness class, but uses a generic
+prompt template for all findings that includes a description of the concrete
+finding. Furthermore, rather than reuse the data-flow traces the scanner potentially
+emitted, Polygraph computes its own taint analysis on-demand,
+which removes the dependence on a scanner that populates \ac{sarif} flow traces
+comprehensively. ZeroFalse depends on CodeQL for exactly this reason. As a
+result, it cannot triage findings of arbitrary scanners, while Polygraph sits
+between any \ac{sarif}-compatible scanner and viewer.
+
+QASecClaw \cite{ameen2026qasecclawmultiagentllmapproach} orchestrates several
+role-specific agents that cover scan planning, Semgrep-based scanning, evidence
+correlation, and an \ac{llm} \ac{sast} Filter Agent. It classifies each finding from its
+enclosing source file and \ac{cwe} label, with a fail-open policy that retains a
+finding whenever the model fails. On OWASP Benchmark v1.2 it achieves an F1-score
+of 0.909 and removes 88.6\% of \acp{fp}. Its filter, however,
+performs no data-flow analysis and reasons only over the enclosing file. Its
+agents also form a fixed pipeline rather than an investigator that gathers
+missing evidence when needed. In contrast, on the Python variant of the OWASP Benchmark,
+Polygraph reaches an F1-score of 0.977 while suppressing 95.8\% of the \ac{fp} traps.
+
+Xiong and Zhang \cite{xiong2026} evaluate three general-purpose coding agents,
+Aider, OpenHands, and SWE-agent, as \ac{fp} filters under three different
+models, rather than proposing a system of their own. Each agent receives the
+alert and the source code and settles the finding on its own. On OWASP Benchmark
+v1.2 for Java they reduce an initial \ac{fp} rate of 98.3\% to 6.3\%, and the
+result carries over to C/C++ findings.
+
+ZeroFalse and QASecClaw judge every finding in a single, fixed-context pass, and
+neither recovers when the evidence a verdict needs is missing from that context.
+Xiong and Zhang measure what this costs. A baseline that receives exactly the
+files their agent had read, but answers in one pass, reaches an F1-score of
+0.516 against the agent's 0.955, so the deciding factor is the iterative
+gathering of evidence rather than a larger context. Polygraph therefore treats
+uncertain as a first-class verdict. The cheap first stage answers the findings
+it can, and only those it cannot resolve escalate to an autonomous agent that
+explores the source code. This confines expensive exploration to the
+hard-to-decide cases that the two prior systems leave unresolved, directly
+attacks the contextual-blindness limitation that ZeroFalse names, and costs far
+less than running an agent on every finding, at 8,196 tokens per OWASP finding on average
+against the 130,846 tokens per alert their best configuration needs.
+
+The same design also decides how many real vulnerabilities survive. Their best
+configuration classifies 22.25\% of the benchmark's real vulnerabilities as
+\acp{fp}, which leads the authors to reject such agents for automatic suppression. Polygraph reaches a
+dangerous-suppression rate of 0.4\% on the Python variant of the OWASP benchmark, a different corpus
+but the same weakness families, because its escalation trigger is asymmetric. It
+fires on every uncertain verdict and every \ac{fp} below high certainty, but
+never on a \ac{tp}, so suppression is the only verdict that has to survive a
+second pass.
+
+Two further differences widen Polygraph's applicability. All three evaluations
+cover Java, ZeroFalse through CodeQL, QASecClaw through Semgrep, and Xiong and
+Zhang through four scanners at once and a small C/C++ sample. In contrast,
+Polygraph supports Python, C, C++, JavaScript, and TypeScript first-class, but can
+also handle findings in other languages. Where ZeroFalse consumes
+\ac{sarif} only from CodeQL and QASecClaw consumes Semgrep JSON, Polygraph both reads and
+writes regular \ac{sarif}, marking \acp{fp} through the standard
+\texttt{suppressions} field. This way, it slots between any compliant scanner
+and viewer. A prompt- and tool-hashing cache further makes repeated scans of an
+unchanged codebase effectively free, a concern that none of the three addresses.
+
+On their respective OWASP evaluations, ZeroFalse and QASecClaw report F1-scores
+of 0.912 and 0.909, while Polygraph reaches 0.977. This gap has two causes.
+Polygraph suppresses more \acp{fp} and, at the same time, misclassifies fewer
+real vulnerabilities as \acp{fp}, so less noise reaches the reviewer without
+more real vulnerabilities being hidden. The agents of Xiong and Zhang achieve
+only the first, as they remove a comparable share of the noise but hide far more
+real vulnerabilities. Only suppression that is safe in both directions can be
+trusted, and that is what lets a team act on Polygraph's verdicts and re-examine
+the escalated cases instead of double-checking the whole report.

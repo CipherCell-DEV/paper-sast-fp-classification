@@ -1,0 +1,198 @@
+\section{Evaluation}
+
+This evaluation measures how accurately Polygraph classifies \ac{sast} findings as real or \acp{fp}, and how this accuracy varies across different \acp{llm}. At its best, Polygraph reaches an F1-score of 0.977 and a suppression precision of 0.997. The evaluation rests on two open-source benchmarks. The OWASP Benchmark for Python
+\cite{owaspbenchmark} contains 1230 test cases, each labeled as real or not.
+RealVuln \cite{realvuln} is a collection of intentionally
+vulnerable open-source applications. We use its human-authored ground-truth, which comprises 748
+findings over 236 files and 73 \acp{cwe}, 622 real vulnerabilities and
+126 hand-authored traps that look vulnerable but are not. The distribution of findings in
+OWASP is skewed the other way: 452 real vulnerabilities against 778 traps.
+Both benchmarks grade detection rather than \ac{fp} classification, so we synthesize one \ac{sarif}-report with one finding for each ground-truth entry. The details of these findings include a basic description, the \ac{cwe} assigned as well as the location of the finding. The assembled report is then passed to Polygraph together with the source code. The source code is cleaned of any ground-truth data, documentation or comments that may hint towards the verdict of a finding. Otherwise the \ac{llm} may base its verdict on the ground-truth data, which would invalidate the evaluation results.
+
+An \ac{fp} verdict is the positive class for precision, recall,
+and the F1-score throughout, since detecting \acp{fp} is the goal. Plain
+accuracy says little, as the benchmarks are unbalanced in opposite directions.
+We therefore report the balanced accuracy and the \ac{mcc}
+together with the dangerous-suppression rate
+\[
+  \frac{\text{real vulnerabilities classified as \acp{fp}}}{\text{real vulnerabilities}},
+\]
+which indicates how many real vulnerabilities were wrongly suppressed.
+
+Every run uses method-level snippet extraction, the file header enricher, and
+no data-flow analysis, and the cache is disabled, so every finding is freshly
+classified and timing stays consistent across runs. Both stages use the same model, and escalation follows the
+default policy. The rendered prompts are identical across all runs.
+
+Data-flow analysis is the slowest step in practice, taking several minutes even for simple projects,
+longer than the model call that follows it. Since its result is needed for
+every context and prompt assembly, enabling it renders the cache ineffective.
+
+Four open-weight models classified both benchmarks under an identical prompt and
+context configuration, each serving both stages: Qwen 3.8 27B, Gemma 4 31B,
+Qwen 3.6 35B, and Qwen3-Next-80B. We chose these four as well-known, readily available models that span a wide range of parameter counts and two model families.
+These models can all be hosted locally, which was a deliberate choice. Security-sensitive findings may contain identifying information or sensitive source code, which is better confined to a trusted environment than sent to third-party inference providers. This also reflects deployment reality, as many organizations will not permit code or vulnerability data to leave their infrastructure \cite{khojah2025}, so a pipeline that depends on external APIs would be unusable in these settings.
+
+\subsection{Classification Quality}
+
+Table~\ref{tab:confusion} shows a run over both benchmarks with Qwen 3.8 27B, the best-performing model in our tests. On the OWASP Benchmark, Polygraph suppresses 745 of 778 traps at a suppression
+precision of 0.997, for an F1-score of 0.977 at a balanced accuracy of 0.973
+and an \ac{mcc} of 0.950. Two of 452 real vulnerabilities were suppressed and 98.9\%
+retained.
+
+For RealVuln, suppression recall stays comparable at 0.825, but precision
+drops to 0.770, for an F1-score of 0.797 at a balanced accuracy of 0.880 and an
+\ac{mcc} of 0.762. Here 31 out of 622 real vulnerabilities were hidden, a dangerous-suppression
+rate of 5.0\%.
+
+Performance differs between the two settings. On synthetic single-file cases the pipeline errs rarely, while on real applications, where a verdict depends on code distributed across a repository, roughly one suppression in four is incorrect. Section \ref{sec:model-comparison} analyzes the cases where the classification was wrong and examines the common sources of error.
+
+\begin{table}[t]
+\caption{Verdicts of the Qwen 3.8 27B run over both corpora. Rows give the
+benchmark label, columns the verdict Polygraph assigned. \texttt{UNCERTAIN}
+verdicts (2 on OWASP, 6 on RealVuln) and findings that errored (7 and 6) are
+counted in the class sizes but omitted from the columns.}
+\label{tab:confusion}
+\centering
+\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+& \multicolumn{2}{c}{OWASP} & \multicolumn{2}{c}{RealVuln} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Oracle & Verdict FP & Verdict TP & Verdict FP & Verdict TP \\
+\midrule
+Real vulnerability & 2   & 447 & 31 & 581 \\
+Trap               & 745 & 27  & 104 & 20  \\
+\midrule
+Class size & \multicolumn{2}{c}{452 / 778} & \multicolumn{2}{c}{622 / 126} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The escalation agent fired on 44 OWASP findings (3.6\%) and 194 RealVuln
+findings (26.1\%). Since it triggers only on uncertain verdicts or on
+\ac{fp} below high certainty, every escalated finding ending
+as \ac{tp} is one the agent overturned. On OWASP it overturned
+19, all real vulnerabilities, and correctly confirmed 23 suppressions. On
+RealVuln it overturned 152, of which 145 are real vulnerabilities and 7 traps,
+recovering 145 vulnerabilities for 7 retained traps.
+
+\subsection{Model Comparison}
+\label{sec:model-comparison}
+
+Fig.~\ref{fig:quality} compares all four models on both benchmarks.
+The ranking by F1 is identical in each case, led
+by Qwen 3.8 27B, with the three leading models spanning 0.09 F1 on OWASP and
+0.11 on RealVuln. Parameter count does not predict quality, as
+the 80B model ranks last and the 27B model leads. What separates them is
+suppression recall, which spans 0.329 to 0.958 on OWASP while precision there
+varies by less than 0.01. Suppression correctness is effectively constant across models, while they vary in how many \acp{fp} they suppress.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  xbar, bar shift=0pt,
+  width=0.97\columnwidth, height=7.2cm,
+  enlarge x limits=false,
+  xmin=0, xmax=1.18,
+  xtick={0,0.2,0.4,0.6,0.8,1.0},
+  bar width=6pt,
+  % model i sits at y=i (1 = worst, 4 = best), the four bars of a model at
+  % y=i+0.30, i+0.10, i-0.10, i-0.30, so OWASP F1 is on top of each group
+  ymin=0.4, ymax=4.6,
+  ytick={1,2,3,4},
+  yticklabels={Qwen3-Next-80B, Qwen 3.6 35B, Gemma 4 31B, Qwen 3.8 27B},
+  yticklabel style={font=\scriptsize},
+  xticklabel style={font=\scriptsize},
+  xmajorgrids, grid style={black!20, very thin},
+  axis lines=left,
+  axis line style={-},
+  x axis line style={shorten >=26pt},
+  point meta=explicit symbolic,
+  nodes near coords={\pgfplotspointmeta},
+  every node near coord/.append style={anchor=west, font=\scriptsize, xshift=2pt},
+  legend style={at={(0.35,-0.10)}, anchor=north, legend columns=4,
+                font=\scriptsize, draw=none, column sep=3pt,
+                /tikz/every even column/.append style={column sep=3pt}},
+  legend image code/.code={\draw[#1] (0cm,-0.06cm) rectangle (0.22cm,0.06cm);},
+]
+\addplot[fill=cff1, draw=none] coordinates {
+  (0.98,4.30) [\textbf{0.98}]  (0.92,3.30) [0.92]
+  (0.89,2.30) [0.89]           (0.49,1.30) [0.49]
+};
+\addplot[fill=cacc, draw=none] coordinates {
+  (0.97,4.10) [0.97]  (0.93,3.10) [0.93]
+  (0.89,2.10) [0.89]  (0.66,1.10) [0.66]
+};
+\addplot[fill=cprec, draw=none] coordinates {
+  (0.80,3.90) [\textbf{0.80}]  (0.72,2.90) [0.72]
+  (0.69,1.90) [0.69]           (0.51,0.90) [0.51]
+};
+\addplot[fill=crec, draw=none] coordinates {
+  (0.88,3.70) [0.88]  (0.83,2.70) [0.83]
+  (0.83,1.70) [0.83]  (0.68,0.70) [0.68]
+};
+\legend{OWASP F1, OWASP bal. acc., RealVuln F1, RealVuln bal. acc.}
+\end{axis}
+\end{tikzpicture}
+\caption{F1-score and balanced accuracy of four models on both benchmarks, sorted
+by OWASP F1 with the best model on top. F1 refers to the \ac{fp} class.
+The best F1-score per benchmark is highlighted.}
+\label{fig:quality}
+\end{figure}
+
+
+The models differ in how aggressively they suppress, and this cost of aggressiveness differs between the two benchmarks. On OWASP recall is nearly free: Qwen 3.8 27B catches 95.8\% of traps while hiding 2 of 452 real vulnerabilities. On RealVuln it is not, as recalls of 0.413 to 0.825 come with dangerous-suppression rates of 4.3\% to 8.8\%. The two do not move together strictly, however, since Qwen 3.8 27B reaches the highest recall at 5.0\% while Qwen 3.6 35B hides 8.8\% of the real vulnerabilities for a lower one. Qwen3-Next-80B marks the degenerate end, answering \ac{tp} to almost everything. It therefore has the lowest dangerous-suppression rate on RealVuln, but leaves 522 of 778 OWASP traps in the report.
+
+Cost varies more than quality does (see Table~\ref{tab:cost}), and escalation
+frequency drives it, since identical prompts give every model a similar input
+volume per call. Gemma 4 31B hands 38.1\% of the RealVuln findings to the agent and
+needs 44\% more tokens per finding than the leading model at a lower
+F1, whereas Qwen3-Next-80B never escalates on OWASP and is an order of
+magnitude faster at the worst F1. Token volume per finding otherwise tracks
+escalation rate rather than model size: Qwen3-Next-80B, which escalates
+least, is also cheapest in tokens on both benchmarks, while Gemma 4 31B and
+Qwen 3.6 35B, which escalate 4 to 9 times as often on RealVuln as on OWASP,
+need 2.3 to 3.2 times as many tokens per finding there. Classification is sequential, so per-finding
+latency is also throughput: the Qwen 3.8 27B run took 17.5 hours on OWASP and
+19.5 on RealVuln.
+
+\begin{table}[t]
+\caption{Escalation rate, mean per-finding latency in seconds, and mean
+per-finding token volume of the first-stage and escalation calls combined,
+measured over all classified findings of each run.}
+\label{tab:cost}
+\centering
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{OWASP} & \multicolumn{3}{c}{RealVuln} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Model & Esc. & s & Tokens & Esc. & s & Tokens \\
+\midrule
+Qwen 3.8 27B    & 3.6\% & 51.4 & 8,196  & 26.1\% & 94.8 & 21,669 \\
+Gemma 4 31B     & 4.1\% & 21.2 & 9,857  & 38.1\% & 37.0 & 31,114 \\
+Qwen 3.6 35B    & 4.4\% & 26.5 & 10,018 & 19.5\% & 33.0 & 22,719 \\
+Qwen3-Next-80B  & 0.0\% &  2.5 & 7,700  &  2.9\% &  4.9 &  9,182 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{What the Models Get Wrong}
+\label{sec:error-analysis}
+
+Of the 27 OWASP traps the model failed to suppress, 15 sit behind an incomplete guard at the sink, which the model rejects as bypassable. Six involve list operations after which the flagged variable in fact holds a fixed value, but the model traces the operation incorrectly and treats the value as attacker-controlled. The remaining six require information the snippet does not contain and the first stage did not escalate these findings.
+On RealVuln, 15 of the 20 surviving traps share one cause: the flagged line is
+safe, but the weakness the finding describes sits a few lines away in the same
+file, and the model reports the vulnerability it locates rather than the
+flagged one. This is intended behavior, as Polygraph judges the validity of \ac{sast} findings and is not designed to correct scanner output.
+
+The 31 suppressed vulnerabilities divide less evenly. In 13 the rule's \ac{cwe} or
+line names a weakness the code at that point does not carry, such as MD5
+password hashing reported as sensitive data exposure, and the model, like it was instructed to, judges the literal claim.
+In 9 findings the ground truth marks a risky pattern that no attacker-controlled data reaches and Polygraph therefore concludes as \ac{fp}.
+In one finding the model's counter-argument holds when it is checked against the source, so it is the label rather than the verdict that is wrong.
+That leaves 8 genuine misses, where the model settled the flagged construct and overlooked a fact one step away from it, such as a debug-setting that turns a deliberately raised exception into a full settings dump. Seven of the eight carried high certainty from the first stage and thus never reached the agent at all.
+
+The dominant error is therefore a mismatch of questions. Polygraph asks whether the finding is correct at the specified location, while some labels are imprecise regarding their location and description. This is a limitation of the evaluation rather than of the system. Polygraph is built to judge the validity of \ac{sast} findings, not to correct their locations or descriptions.

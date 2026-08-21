@@ -1,0 +1,113 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{acro}
+\usepackage[colorinlistoftodos]{todonotes}
+\usetikzlibrary{positioning,arrows.meta}
+\pgfplotsset{compat=1.17}
+
+\input{acronyms}
+
+% Listing float, so that code blocks are numbered as "Listing N".
+\newfloat{listing}{tbp}{lol}
+\floatname{listing}{Listing}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize\linespread{0.9}\selectfont,
+  breaklines=true,
+  breakindent=0pt,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=none,
+  aboveskip=0pt,
+  belowskip=0pt,
+  xleftmargin=0pt,
+}
+
+% Palette of the metric bars (matches the original figure).
+\definecolor{cacc}{HTML}{4C72B0}
+\definecolor{cprec}{HTML}{DD8452}
+\definecolor{crec}{HTML}{55A868}
+\definecolor{cff1}{HTML}{C44E52}
+
+\newcommand{\fk}[1]{\todo[inline, color=green]{\textbf{FK:} #1}}
+
+\begin{document}
+
+\title{Polygraph: Automated False-Positive Classification of SAST Findings}
+
+\author{
+\IEEEauthorblockN{Alexander Braml}
+\IEEEauthorblockA{\textit{Chair of Computer Engineering} \\
+\textit{University of Passau}\\
+Passau, Germany \\
+alexander.braml@uni-passau.de}
+\and
+\IEEEauthorblockN{Florian Frank}
+\IEEEauthorblockA{\textit{Chair of Computer Engineering} \\
+\textit{University of Passau}\\
+Passau, Germany \\
+florian.frank@uni-passau.de}
+\and
+\IEEEauthorblockN{Felix Klement}
+\IEEEauthorblockA{\textit{Chair of Computer Engineering} \\
+\textit{University of Passau}\\
+Passau, Germany \\
+felix.klement@uni-passau.de}
+}
+
+\maketitle
+
+\begin{abstract}
+\Ac{sast} tools frequently generate findings
+that, upon further investigation, turn out to be \acp{fp} rather than
+genuine vulnerabilities. Triaging these \acp{fp} by hand is slow and
+draws effort away from the real weaknesses that demand attention. In
+this work, we present Polygraph, a tool that classifies each \ac{sast} finding as
+a \ac{tp} or an \ac{fp}. It reads and writes reports in standard \ac{sarif}
+format and operates between any compliant scanner and viewer. For each finding,
+it assembles a compact, finding-specific context from the surrounding code,
+together with a data-flow analysis that traces how input reaches the affected
+location. It then queries a \ac{llm} for a verdict. When this static
+context does not settle a finding, Polygraph escalates it to an autonomous agent
+that explores the repository directly. Evaluated with four open-weight \acp{llm}
+on the synthetic OWASP Benchmark for Python, Polygraph suppresses 95.8\% of
+its \ac{fp} traps at a suppression precision of 0.997 and a
+dangerous-suppression rate of 0.4\%, for an F1-score of 0.977 and a balanced
+accuracy of 0.973. On RealVuln, a corpus of real-world vulnerable applications
+whose findings depend on code spread across a repository rather than a single
+file, it reaches a lower F1-score of 0.797 at a balanced accuracy of 0.880,
+suppressing 82.5\% of its traps at a dangerous-suppression rate of 5.0\%.
+Since these results hold with locally-hosted, open-weight models that keep
+code from leaving an organization's own infrastructure, Polygraph makes a
+reliable source of \ac{sast} triage decisions available even in
+security-sensitive settings that cannot rely on third-party inference
+providers.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Static Application Security Testing, SAST, False-Positive Reduction, Software
+Security
+\end{IEEEkeywords}
+
+\input{sections/introduction}
+\input{sections/related-work}
+\input{sections/approach}
+\input{sections/evaluation}
+
+\input{sections/conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}

@@ -1,0 +1,133 @@
+\section{Approach}
+
+Polygraph takes two inputs: a \ac{sarif} report that lists all findings and the root directory of the analyzed source code. From these, it classifies every finding as a \ac{tp} or an \ac{fp} in a two-stage process and writes the verdicts back into an annotated copy of the report.
+
+\subsection{Architectural Overview}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=2pt, inner sep=4pt, align=center,
+              font=\footnotesize, minimum height=6mm},
+  arr/.style={-{Stealth[length=4pt]}, semithick},
+  lbl/.style={font=\scriptsize, fill=white, inner sep=1.5pt, align=center},
+  node distance=6mm,
+]
+  % --- inputs ---
+  \node[box] (sarif) {SARIF report};
+  \node[box, right=8mm of sarif] (src) {Source code};
+  \path (sarif) -- (src) coordinate[midway] (in);
+
+  % --- pipeline ---
+  \node[box, below=8mm of in] (parse) {Parse findings};
+  \node[box, below=of parse] (enrich) {Enrich context};
+  \node[box, below=of enrich] (class) {Static context\\classification};
+  \node[box, below=20mm of class] (out) {Annotated SARIF};
+  \node[box, right=26mm of class] (agent) {Escalation\\agent};
+
+  % --- edges ---
+  \draw[arr] (sarif) -- (parse);
+  \draw[arr] (src)   -- (parse);
+  \draw[arr] (parse) -- (enrich);
+  \draw[arr] (enrich) -- (class);
+  \draw[arr] (class) -- node[lbl, left] {TP / FP} (out);
+
+  \draw[arr] (class.east) to[bend left=12]
+        node[lbl, above=1mm, pos=0.5, yshift=0.5mm] {uncertain} (agent.north west);
+  \draw[arr] (class.east) to[bend right=12]
+        node[lbl, below=1mm, pos=0.5, yshift=-0.5mm]
+        {\ac{fp},\\medium / low confidence} (agent.south west);
+
+  \draw[arr] (agent.south) |- node[lbl, above, pos=0.72]
+        {TP / FP /\\UNCERTAIN} (out.east);
+\end{tikzpicture}
+\caption{Overview of the Polygraph pipeline. Findings parsed from the \ac{sarif}
+report are enriched with context from the source tree and classified by the
+first-stage \ac{llm}. Only findings it marks uncertain or
+\ac{fp} with medium or low confidence escalate to the autonomous
+agent before Polygraph writes the annotated \ac{sarif} report.}
+\label{fig:pipeline}
+\end{figure}
+
+The pipeline, shown in Fig.~\ref{fig:pipeline}, first reads and parses the \ac{sarif}
+report and then iterates over all findings. For each finding, Polygraph
+assembles the required context, renders it into a prompt, and sends the prompt
+to the model for classification. Context generation is modular. A new enricher
+can extend the context without any change to the surrounding pipeline. Prompt
+templates are version-controlled and adjustable, as Polygraph inserts the
+context into templates rather than constructing them in code. Model
+endpoints are interchangeable as well, and any OpenAI-compatible endpoint is
+supported. When the model returns uncertain or \ac{fp}
+with medium or low certainty for a finding, Polygraph passes that finding to the
+second stage using an autonomous agent.
+
+To keep re-runs cheap and reproducible, Polygraph hashes every rendered prompt
+and, with an optional SQLite cache keyed by that hash and model name, skips the
+model call for identical prompts. For escalated findings, it hashes the initial
+prompt as well as the tool calls and their results, so even the results of these
+findings can be efficiently cached. Because context assembly and tool calling are deterministic,
+re-scanning an unchanged codebase is effectively free, and across successive
+scans only the few newly surfaced findings require classification, while
+unchanged findings reuse their earlier verdicts.
+
+Polygraph finally writes a copy of the original \ac{sarif} report, enriched with
+additional attributes. For an \ac{fp} it adds the standard \ac{sarif}
+\texttt{suppressions} field and records the reasoning behind the decision. For
+every finding it additionally adds a custom property that
+holds the verdict and the reasoning. A dashboard or \ac{sarif} viewer can read these
+attributes to display the verdicts, which lets developers concentrate on the
+\acp{tp}.
+
+A central design goal was to keep Polygraph extensible to further languages.
+By default, Polygraph supports every language and technology in a basic way with line-based
+snippet extraction and no data-flow analysis, while the remaining steps operate
+unchanged. Full support of the additional snippet-extraction strategies requires updating the tree-sitter
+integration to install and import the grammar for the new language. Data-flow
+analysis requires a new custom query, because \texttt{CodeQL}, the framework we use for data-flow analysis, is language-agnostic in principle but still needs language-specific adjustments. Polygraph currently fully supports Python, C, C++, JavaScript, and TypeScript.
+
+Every stage of the pipeline fails safely. If a finding cannot be classified, because context assembly fails or because the model request errors out, Polygraph keeps it in the resulting report without annotation. A failure therefore never suppresses a finding, so the report remains trustworthy even when parts of the pipeline do not succeed.
+
+\subsection{Stage 1: Static Classification}
+
+The first step in classifying a finding is to assemble the context for the \ac{llm} to use to output a verdict.
+This context should be enough to settle a verdict, but, to not confuse the model with too much context, it should be compact. To dynamically generate this context and test different configurations, Polygraph relies on Enrichers, which form the foundation of context generation, and it currently implements three of them. The \texttt{HeaderEnricher} extracts the header comment from the first lines of a file, following the comment syntax of the file's language. The file header often states what the file does, who wrote it and why, which can help the model judge a finding in that file. The \texttt{SnippetEnricher} extracts the code that surrounds the finding. It parses the file with tree-sitter and offers several strategies to extract code context. One can include the enclosing method, class or file or a configurable number of lines above and below the affected line.
+The immediately surrounding code is essential for the model to understand what the code does and does not do. A possible SQL injection for example needs to know whether sanitization occurs before user-input reaches a query, which can be checked using the code surrounding the finding.
+
+The \texttt{DataflowEnricher} performs data-flow analysis on all variables on the affected line and shows how data reaches those variables.
+
+Because some tools also scan the git history, all enrichers read the affected file at the exact commit of the finding to get the correct file content. Each enricher also carries a numeric priority, so that a configurable token limit drops low-priority context first. The output of the enrichers is then assembled into a user prompt describing the concrete finding that is to be classified.
+The system prompt is static and does not change between findings. It gives instructions on how to classify findings and frames the classification as one question: does the finding's described weakness hold in the shown code? It also provides detailed criteria for tracing sources to sinks and confirming mitigation. The prompt also explicitly steers the model towards uncertain whenever the context is not enough to settle a finding.
+This system prompt together with the customized user prompt is then sent to the \ac{llm} for classification. The model then returns structured output containing a verdict, reasoning and a certainty indicating how confident the \ac{llm} is in its answer.
+
+If the model is sure this is an \ac{fp} or \ac{tp}, this verdict is annotated in the resulting \ac{sarif}-report. If the model returns uncertain or \ac{fp} with only a medium or lower certainty, the second stage using the autonomous escalation agent is activated. Activating it also for low- and medium-confidence \acp{fp} as well ensures the model checks this verdict once more with a more-capable model, as suppressing real \acp{tp} is a costly mistake.
+
+\subsection{Stage 2: Autonomous Classification Agent}
+
+Findings that the first stage does not settle are handed to an autonomous
+escalation agent that has access to various read-only tools to interact with the source code.
+The agent investigates the finding on its own and must commit to the same
+structured verdict the first stage returns.
+
+It has access to three read-only tools. \texttt{read\_file} returns a source file with
+line numbers, either a requested range or a truncated version of the file
+together with information about its size. \texttt{list\_directory} lists the
+entries of a directory, and \texttt{search\_files} searches the repository for a
+regular expression and returns the matching lines with their locations. Every path
+a tool receives is resolved against the repository root and rejected if it escapes it, and each
+tool truncates its output so that a single call cannot flood the context
+window. A configurable budget of model requests bounds the investigation. If the agent exhausts it, Polygraph reports uncertain, leaving the annotated finding in the report for manual review.
+
+The agent deliberately does not receive the static context of the first stage.
+Its user prompt includes only data about the finding as well as the first-stage reasoning, which
+names the missing evidence. It also prescribes an "investigate then commit" pattern, where the agent should first gather comprehensive evidence before committing to a verdict.
+The system prompt on the other hand includes the agent's role, the available tools and instructions on how to classify findings as well as a set of rules preventing shortcuts. These rules define things like guards only counting as genuine mitigation if their actual implementation was read or secrets that only count as real ones if they are consumed by security-sensitive code.
+
+Caching this stage requires more effort than caching the first, because the
+verdict depends on files the prompt does not contain. Polygraph records every
+tool call of a run together with a hash of its result. On a later run it replays
+the recorded calls against the current source tree and reuses the cached verdict
+only if every result reproduces exactly and any deviation triggers a fresh
+investigation. These records double as an audit transcript of what the agent
+read. The agent's model is configured independently of the first-stage model, so
+that the minority of findings reaching this stage can be resolved by a stronger
+model and the extra cost arises only where it pays off.
