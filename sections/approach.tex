@@ -78,12 +78,20 @@ holds the verdict and the reasoning. A dashboard or \ac{sarif} viewer can read t
 attributes to display the verdicts, which lets developers concentrate on the
 \acp{tp}.
 
-A central design goal was to keep Polygraph extensible to further languages.
-By default, Polygraph supports every language and technology in a basic way with line-based
-snippet extraction and no data-flow analysis, while the remaining steps operate
-unchanged. Full support of the additional snippet-extraction strategies requires updating the tree-sitter
-integration to install and import the grammar for the new language. Data-flow
-analysis requires a new custom query, because \texttt{CodeQL}, the framework we use for data-flow analysis, is language-agnostic in principle but still needs language-specific adjustments. Polygraph currently fully supports Python, C, C++, JavaScript, and TypeScript.
+A central design goal was to keep Polygraph extensible to new languages. Because the
+pipeline is language-agnostic, Polygraph works with any language or
+technology out of the box, though at a basic level of support. In this default mode,
+the \texttt{SnippetEnricher} falls back to extracting a configurable number of lines
+above and below the affected line rather than the enclosing method, class, or file, and
+the \texttt{DataflowEnricher} is unavailable, so no data-flow analysis is performed.
+
+Raising a language to full support requires two additions. Richer snippet extraction
+requires extending the tree-sitter integration to install and import the language's
+grammar. Data-flow analysis requires a new custom query. \texttt{CodeQL}, the framework
+we use for this purpose, is language-agnostic in principle but still relies on
+language-specific queries. Polygraph currently provides full support for Python, C,
+C\texttt{++}, JavaScript, and TypeScript, which already covers many of the most
+popular languages in use today.
 
 Every stage of the pipeline fails safely. If a finding cannot be classified, because context assembly fails or because the model request errors out, Polygraph keeps it in the resulting report without annotation. A failure therefore never suppresses a finding, so the report remains trustworthy even when parts of the pipeline do not succeed.
 

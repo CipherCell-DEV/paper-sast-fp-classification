@@ -32,6 +32,7 @@ Four open-weight models classified both benchmarks under an identical prompt and
 context configuration, each serving both stages: Qwen 3.8 27B, Gemma 4 31B,
 Qwen 3.6 35B, and Qwen3-Next-80B. We chose these four as well-known, readily available models that span a wide range of parameter counts and two model families.
 These models can all be hosted locally, which was a deliberate choice. Security-sensitive findings may contain identifying information or sensitive source code, which is better confined to a trusted environment than sent to third-party inference providers. This also reflects deployment reality, as many organizations will not permit code or vulnerability data to leave their infrastructure \cite{khojah2025}, so a pipeline that depends on external APIs would be unusable in these settings.
+We served all models locally with vLLM on a machine with two AMD EPYC 7542 CPUs (32 cores each, 64 cores total), 97\,GB of RAM, and 8$\times$NVIDIA RTX A4500 GPUs with 20\,GB of VRAM each.
 
 \subsection{Classification Quality}
 
@@ -74,8 +75,7 @@ findings (26.1\%). Since it triggers only on uncertain verdicts or on
 \ac{fp} below high certainty, every escalated finding ending
 as \ac{tp} is one the agent overturned. On OWASP it overturned
 19, all real vulnerabilities, and correctly confirmed 23 suppressions. On
-RealVuln it overturned 152, of which 145 are real vulnerabilities and 7 traps,
-recovering 145 vulnerabilities for 7 retained traps.
+RealVuln it overturned 152, of which 145 are real vulnerabilities and 7 traps.
 
 \subsection{Model Comparison}
 \label{sec:model-comparison}

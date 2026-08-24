@@ -55,7 +55,7 @@ injection flaw or unsafe handling of user input \cite{chess2004static}. Each
 issue such a tool reports is a finding, annotated with a rule identifier, a
 severity, and the code location it concerns. Because these tools only statically
 analyze the source code and do not interpret the context around the finding, like sanitization steps or dynamic behavior at runtime, they also report many findings that are not real vulnerabilities in their context.
-Some tools also over-approximate and rather report an \ac{fp} than missing a \ac{tp}, which results in further increases of the overall volume of findings.
+Some tools also over-approximate and would rather report an \ac{fp} than missing a \ac{tp}, which results in further increases of the overall volume of findings.
 
 Individual \ac{sast} tools historically output their results in incompatible,
 proprietary formats, which complicates aggregating and processing findings
@@ -67,7 +67,7 @@ viewer should hide. Polygraph reads \ac{sarif} as input and writes \ac{sarif} as
 which lets it operate between existing scanners and any viewer or dashboard that
 supports \ac{sarif}.
 
-Many \ac{sast} findings deal with uncontrolled and unsanitized user-input reaching a sensible sink, such as a database query or system command. For these findings, the way data flows into the vulnerable line is essential
+Many \ac{sast} findings deal with uncontrolled and unsanitized user input reaching a sensitive sink, such as a database query or system command. For these findings, the way data flows into the vulnerable line is essential
 to determine if it is genuine. Data-flow analysis addresses this by statically tracing values from their source, where the data enters the program, to the sink, which in our case is the location reported by the \ac{sast} tool.
 A common form is taint analysis, which tracks whether data from an untrusted source, like user input, reaches a
 security-sensitive sink, such as a database query, and whether a sanitizer
